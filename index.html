@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3D Viewer</title>
+    <style>
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        margin: 0;
+        background-color: #000;
+        overflow: hidden;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        width: 100vw;
+        height: 100vh;
+      }
+      .grid img {
+        width: 100vw;
+        height: 100vh;
+        object-fit: cover;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+      .slider-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 1000;
+        cursor: none;
+      }
+      .loading-screen {
+        position: fixed;
+        inset: 0;
+        background: #000;
+        color: #fff;
+        display: grid;
+        place-items: center;
+        z-index: 2000;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loading-screen">Loading images...</div>
+    <div class="grid" id="grid"></div>
+    <div class="slider-container"></div>
+
+    <script>
+      const columns = 45;
+      const totalImages = 270;
+      const imagesPerRow = 45;
+      let imageRows = [];
+      let currentIndex = 0;
+      let preloadedImages = new Map();
+      let totalRows = 0;
+
+      async function countImages() {
+        return Math.ceil(totalImages / imagesPerRow);
+      }
+
+      function generateImageRows(numRows) {
+        imageRows = [];
+        for (let i = 0; i < numRows; i++) {
+          const start = i * imagesPerRow;
+          const rowLength = Math.min(imagesPerRow, totalImages - start);
+          const row = Array.from(
+            { length: rowLength },
+            (_, j) => `images/${(start + j).toString().padStart(7, "0")}.jpg`
+          );
+          imageRows.push(row);
+        }
+      }
+
+      async function loadImages() {
+        try {
+          totalRows = await countImages();
+          generateImageRows(totalRows);
+          const preloadPromises = [];
+          for (let row = 0; row < totalRows; row++) {
+            for (let col = 0; col < columns; col++) {
+              if (row * imagesPerRow + col < totalImages) {
+                const src = imageRows[row][col];
+                preloadPromises.push(preloadImage(src));
+              }
+            }
+          }
+          await Promise.all(preloadPromises);
+          document.querySelector(".loading-screen").style.display = "none";
+        } catch (error) {
+          console.error("Failed to load images:", error);
+        }
+      }
+
+      async function preloadImage(src) {
+        if (preloadedImages.has(src)) return preloadedImages.get(src);
+
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => {
+            preloadedImages.set(src, img);
+            resolve(img);
+          };
+          img.onerror = () => reject(new Error(`Failed to load ${src}`));
+          img.src = src;
+        });
+      }
+
+      function createGrid() {
+        const grid = document.getElementById("grid");
+        grid.innerHTML = "";
+
+        const row = Math.floor(currentIndex / columns);
+        const col = currentIndex % columns;
+
+        const img = document.createElement("img");
+        img.draggable = false;
+        const rowImages = imageRows[row % imageRows.length];
+        const src = rowImages[col];
+        img.src = src;
+        img.onerror = () => {
+          console.error(`Failed to load image: ${src}`);
+          img.src = "data:image/gif;base64,oogidyboogidy";
+        };
+        grid.appendChild(img);
+
+        const nextIndex = (currentIndex + 1) % (totalRows * columns);
+        const nextRow = Math.floor(nextIndex / columns);
+        const nextCol = nextIndex % columns;
+        preloadImage(imageRows[nextRow][nextCol]);
+      }
+
+      function wrapPosition(pos, max) {
+        return ((pos % max) + max) % max;
+      }
+
+      function updateGrid(x, y) {
+        const relX = (x / window.innerWidth) * columns;
+        const relY = ((window.innerHeight - y) / window.innerHeight) * columns;
+
+        const col = Math.floor(relX);
+        const row = Math.floor(relY) % totalRows;
+
+        currentIndex =
+          wrapPosition(row, totalRows) * columns + wrapPosition(col, columns);
+        createGrid();
+      }
+
+      async function startFlipping() {
+        await loadImages();
+        if (imageRows.length === 0) {
+          console.error("No images found");
+          return;
+        }
+
+        const sliderContainer = document.querySelector(".slider-container");
+        let isDragging = false;
+
+        document.addEventListener("mousemove", (e) => {
+          if (isDragging) {
+            const x =
+              (e.movementX + e.clientX + window.innerWidth) % window.innerWidth;
+            const y =
+              (e.movementY + e.clientY + window.innerHeight) %
+              window.innerHeight;
+            updateGrid(x, y);
+          }
+        });
+
+        sliderContainer.addEventListener("mousedown", (e) => {
+          isDragging = true;
+          sliderContainer.requestPointerLock();
+          updateGrid(e.clientX, e.clientY);
+        });
+
+        document.addEventListener("mouseup", () => {
+          isDragging = false;
+          document.exitPointerLock();
+        });
+
+        document.addEventListener("pointerlockchange", () => {
+          if (!document.pointerLockElement) {
+            isDragging = false;
+          }
+        });
+
+        createGrid();
+      }
+
+      startFlipping();
+    </script>
+  </body>
+</html>
